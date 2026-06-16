@@ -202,28 +202,7 @@ async function lerAba(nome){
     return parseCSV(await r.text());
   }catch(e){console.warn('Erro aba',nome,e);return[];}
 }
-function parseCSV(txt){
-  const lines=txt.trim().split('\n');if(lines.length<2)return[];
-  const primeiraLinha=parseLine(lines[0]).map(v=>csvVal(v));
-  // Detecta se tem cabeçalho: primeira célula não é timestamp ISO
-  const temCabecalho=!primeiraLinha[0].match(/^\d{4}-\d{2}-\d{2}T/);
-  const headers=temCabecalho?primeiraLinha:['data_hora','usuario','data','hora','dia_semana'];
-  const dataLines=temCabecalho?lines.slice(1):lines;
-  return dataLines.map(l=>{
-    const vals=parseLine(l),obj={};
-    headers.forEach((h,i)=>{
-      const raw=vals[i]||'';
-      // Para campos que contêm JSON (estado, dados): faz unescape CSV correto
-      // Para campos simples: remove aspas externas
-      obj[h]=csvVal(raw);
-    });
-    return obj;
-  }).filter(o=>Object.values(o).some(v=>v));
-}
-// Faz unescape correto de um valor CSV:
-// - Remove aspas externas se existirem
-// - Converte "" interno → "  (padrão CSV RFC 4180)
-// NÃO remove todas as aspas cegamente (isso quebra JSON)
+// Parser CSV robusto: trata campos com quebras de linha internas (JSON longo)
 function csvVal(raw){
   const s=raw.trim();
   if(s.startsWith('"')&&s.endsWith('"')){
@@ -231,10 +210,40 @@ function csvVal(raw){
   }
   return s;
 }
-function parseLine(line){
-  const result=[],re=/("(?:[^"]|"")*"|[^,]*)/g;let m;
-  while((m=re.exec(line))!==null){if(m.index===re.lastIndex)re.lastIndex++;result.push(m[1]);}
-  return result;
+function parseCSV(txt){
+  // Divide em registros respeitando aspas (campo pode ter \n interno)
+  const registros=[];
+  let cur='', inQ=false;
+  for(let i=0;i<txt.length;i++){
+    const c=txt[i];
+    if(c==='"'){
+      if(inQ&&txt[i+1]==='"'){cur+='"';i++;}
+      else{inQ=!inQ;cur+=c;}
+    }else if(c==='\n'&&!inQ){
+      registros.push(cur);cur='';
+    }else{
+      cur+=c;
+    }
+  }
+  if(cur.trim())registros.push(cur);
+  if(registros.length<2)return[];
+
+  const parseLinha=line=>{
+    const vals=[],re=/("(?:[^"]|"")*"|[^,]*)/g;let m;
+    while((m=re.exec(line))!==null){if(m.index===re.lastIndex)re.lastIndex++;vals.push(m[1]);}
+    return vals;
+  };
+
+  const primeiraLinha=parseLinha(registros[0]).map(v=>csvVal(v));
+  const temCabecalho=!primeiraLinha[0].match(/^\d{4}-\d{2}-\d{2}T/);
+  const headers=temCabecalho?primeiraLinha:['data_hora','usuario','data','hora','dia_semana'];
+  const dataLines=temCabecalho?registros.slice(1):registros;
+
+  return dataLines.map(l=>{
+    const vals=parseLinha(l),obj={};
+    headers.forEach((h,i)=>{ obj[h]=csvVal(vals[i]||''); });
+    return obj;
+  }).filter(o=>Object.values(o).some(v=>v));
 }
 
 // ── CARREGAMENTO ──
@@ -248,32 +257,43 @@ async function carregar(){
   if(btn){btn.classList.remove('loading');btn.textContent='↻ Atualizar';}
 }
 
-// ── SNAPSHOT POR GESTOR (BUG FIX PRINCIPAL) ──
-// Problema anterior: recriava resumo do zero ignorando o que já vinha no JSON
-// Fix: usa o resumo do JSON diretamente; só recalcula se não existir
+// ── SNAPSHOT POR GESTOR ──
 function getSnapshotPorGestor(){
   const snaps={};
+  console.log('Total snapshots carregados:', dadosSnapshots.length);
   dadosSnapshots.forEach(s=>{
     if(!s.usuario)return;
-    // Match defensivo: "Vinicius Fioretti" ainda bate com "Vinicius"
     const key=GESTORES.find(g=>s.usuario.toLowerCase().includes(g.toLowerCase()));
     if(!key)return;
     const dataHora=new Date(s.data_hora||s.timestamp||0);
     if(isNaN(dataHora))return;
     if(snaps[key]&&dataHora<=snaps[key]._dataHora)return;
+    const rawEstado=s.estado||s.dados||'';
     let estado={};
-    try{estado=JSON.parse(s.estado||s.dados||'{}');}catch(e){return;}
-    // USA o resumo que já vem no JSON — não recalcula
-    if(!estado.resumo){
-      // Fallback apenas se resumo ausente
+    if(rawEstado){
+      try{
+        estado=JSON.parse(rawEstado);
+      }catch(e){
+        try{
+          estado=JSON.parse(rawEstado.replace(/""/g,'"'));
+        }catch(e2){
+          console.warn('Falha parse estado para',key,e2.message,'raw:',rawEstado.slice(0,300));
+          snaps[key]={...s,_estado:{},_dataHora:dataHora,_dataFormatada:dataHora.toLocaleDateString('pt-BR')};
+          return;
+        }
+      }
+    }
+    if(!estado.resumo||typeof estado.resumo!=='object'){
       const bf=estado.briefing||[];
       estado.resumo={
         urgentes:bf.filter(x=>!x.done&&!x.concluido&&(x.status==='urgente'||x.urgente)).length,
         abertos:bf.filter(x=>!x.done&&!x.concluido).length,
         concluidos:bf.filter(x=>x.done||x.concluido).length,
-        followupsPendentes:(estado.followup||[]).filter(x=>!x.done).length
+        followupsPendentes:(estado.followup||[]).filter(x=>!x.done).length,
+        totalBriefing:bf.length
       };
     }
+    console.log('Snap ok:', key, JSON.stringify(estado.resumo));
     snaps[key]={...s,_estado:estado,_dataHora:dataHora,_dataFormatada:dataHora.toLocaleDateString('pt-BR')};
   });
   return snaps;
