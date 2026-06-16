@@ -575,13 +575,15 @@ function renderAtrasadas(snaps){
   return h;
 }
 
-// ── LEMBRETE VIA APPS SCRIPT ──
+// ── LEMBRETE VIA APPS SCRIPT (GET para evitar CORS) ──
 async function enviarLembrete(gestor){
   const email=EMAILS[gestor];
   if(!email){alert('Email não configurado para '+gestor);return;}
   const btn=event.target;btn.disabled=true;btn.textContent='Enviando...';
   try{
-    const r=await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'enviarLembrete',gestor,email,semana:new Date().toLocaleDateString('pt-BR')})});
+    const semana=new Date().toLocaleDateString('pt-BR');
+    const url=`${APPS_SCRIPT_URL}?acao=enviarLembrete&gestor=${encodeURIComponent(gestor)}&email=${encodeURIComponent(email)}&semana=${encodeURIComponent(semana)}`;
+    const r=await fetch(url,{redirect:'follow'});
     const data=await r.json();
     if(data.status==='ok'){btn.textContent='✓ Enviado';btn.style.color='var(--green)';}
     else{btn.textContent='Erro';btn.style.color='var(--red)';}
@@ -589,7 +591,7 @@ async function enviarLembrete(gestor){
   setTimeout(()=>{btn.disabled=false;btn.textContent='✉ Lembrar';btn.style.color='';},3000);
 }
 
-// ── IA VIA APPS SCRIPT (sem CORS) ──
+// ── IA VIA APPS SCRIPT GET (sem CORS) ──
 async function gerarIA(){
   const snaps=getSnapshotPorGestor();
   const box=document.getElementById('ia-result');
@@ -601,21 +603,17 @@ async function gerarIA(){
     const r=snap._estado?.resumo||{};
     const alCrit=(snap._estado?.alertas||[]).filter(a=>a.nivel==='v').map(a=>a.title||a.titulo).filter(Boolean).join(', ');
     const pend=(snap._estado?.fechamento||[]).filter(f=>f.tipo==='p'&&!f.done).map(f=>f.texto).filter(Boolean).slice(0,2).join('; ');
-    return`${g} (${AREAS[g]}): ${r.urgentes||0} urgentes, ${r.abertos||0} em aberto, ${r.concluidos||0} concluídas${alCrit?` | alertas críticos: ${alCrit}`:''}${pend?` | pendências: ${pend}`:''}`;
-  }).join('\n');
+    return`${g} (${AREAS[g]}): ${r.urgentes||0} urgentes, ${r.abertos||0} em aberto, ${r.concluidos||0} concluídas${alCrit?` | alertas: ${alCrit}`:''}${pend?` | pendências: ${pend}`:''}`;
+  }).join(' | ');
 
-  const prompt=`Você é um consultor sênior de gestão da Road.ag, agência de marketing digital brasileira. Analise os dados abaixo e gere entre 3 e 5 sugestões de ação CONCRETAS e ACIONÁVEIS para Vinicius (fundador) e Sabrina (CEO). Cada sugestão deve: nomear a pessoa ou área, descrever a situação em 1 frase e recomendar uma ação específica. Responda APENAS em JSON válido, sem markdown: {"sugestoes":[{"titulo":"...","contexto":"...","acao":"..."}]}\n\nDados da semana:\n${contexto}`;
+  const prompt=`Você é consultor sênior da Road.ag, agência de marketing digital brasileira. Analise os dados e gere 3 a 5 sugestões CONCRETAS para Vinicius (fundador) e Sabrina (CEO). Cada sugestão: nome a pessoa/área, descreva a situação em 1 frase, recomende ação específica. Responda APENAS JSON sem markdown: {"sugestoes":[{"titulo":"...","contexto":"...","acao":"..."}]} Dados: ${contexto}`;
 
   try{
-    // Chama a API via Apps Script para evitar CORS
-    const r=await fetch(APPS_SCRIPT_URL,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({acao:'gerarIA',prompt})
-    });
+    const url=`${APPS_SCRIPT_URL}?acao=gerarIA&prompt=${encodeURIComponent(prompt)}`;
+    const r=await fetch(url,{redirect:'follow'});
     const data=await r.json();
     if(data.status!=='ok'||!data.resultado){
-      box.innerHTML=`<div style="font-size:12px;color:var(--red)">Erro: ${data.erro||'Resposta inválida do servidor'}.</div>`;
+      box.innerHTML=`<div style="font-size:12px;color:var(--red)">Erro: ${data.erro||'Resposta inválida'}. Verifique se a chave ANTHROPIC_KEY está configurada nas propriedades do script.</div>`;
       return;
     }
     let sugestoes=[];
@@ -624,7 +622,7 @@ async function gerarIA(){
     iaGerado=sugestoes.map(s=>`<div class="ia-item"><div style="font-size:12px;font-weight:700;color:var(--deep);margin-bottom:3px">${s.titulo}</div><div class="ia-item-text">${s.contexto}</div>${s.acao?`<div style="font-size:11px;font-weight:600;color:var(--purple);margin-top:5px">→ ${s.acao}</div>`:''}</div>`).join('');
     box.innerHTML=iaGerado;
   }catch(e){
-    box.innerHTML=`<div style="font-size:12px;color:var(--red)">Erro de conexão. Verifique se o Apps Script está publicado e tente novamente.</div>`;
+    box.innerHTML=`<div style="font-size:12px;color:var(--red)">Erro de conexão com o servidor.</div>`;
   }
 }
 
