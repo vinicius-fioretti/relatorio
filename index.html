@@ -184,6 +184,19 @@ document.getElementById('h-date').textContent = new Date().toLocaleDateString('p
 // ── CSV ──
 async function lerAba(nome){
   try{
+    if(nome==='sessoes'){
+      // Sessoes não tem cabeçalho e tem timestamps com vírgulas — usar JSON em vez de CSV
+      const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(nome)}&t=${Date.now()}`);
+      if(!r.ok)return[];
+      const txt=await r.text();
+      // gviz retorna google.visualization.Query.setResponse({...}) — extrair o JSON
+      const json=JSON.parse(txt.replace(/^[^(]+\(|\);?$/g,''));
+      const rows=json?.table?.rows||[];
+      return rows.map(row=>{
+        const vals=(row.c||[]).map(c=>c?.v!=null?String(c.v):'');
+        return{data_hora:vals[0]||'',usuario:vals[1]||'',data:vals[2]||'',hora:vals[3]||'',dia_semana:vals[4]||''};
+      }).filter(r=>r.data_hora||r.usuario);
+    }
     const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(nome)}&t=${Date.now()}`);
     if(!r.ok)return[];
     return parseCSV(await r.text());
@@ -191,16 +204,32 @@ async function lerAba(nome){
 }
 function parseCSV(txt){
   const lines=txt.trim().split('\n');if(lines.length<2)return[];
-  const primeiraLinha=parseLine(lines[0]).map(v=>v.replace(/"/g,'').trim());
+  const primeiraLinha=parseLine(lines[0]).map(v=>csvVal(v));
   // Detecta se tem cabeçalho: primeira célula não é timestamp ISO
   const temCabecalho=!primeiraLinha[0].match(/^\d{4}-\d{2}-\d{2}T/);
   const headers=temCabecalho?primeiraLinha:['data_hora','usuario','data','hora','dia_semana'];
   const dataLines=temCabecalho?lines.slice(1):lines;
   return dataLines.map(l=>{
     const vals=parseLine(l),obj={};
-    headers.forEach((h,i)=>obj[h]=(vals[i]||'').replace(/"/g,'').trim());
+    headers.forEach((h,i)=>{
+      const raw=vals[i]||'';
+      // Para campos que contêm JSON (estado, dados): faz unescape CSV correto
+      // Para campos simples: remove aspas externas
+      obj[h]=csvVal(raw);
+    });
     return obj;
   }).filter(o=>Object.values(o).some(v=>v));
+}
+// Faz unescape correto de um valor CSV:
+// - Remove aspas externas se existirem
+// - Converte "" interno → "  (padrão CSV RFC 4180)
+// NÃO remove todas as aspas cegamente (isso quebra JSON)
+function csvVal(raw){
+  const s=raw.trim();
+  if(s.startsWith('"')&&s.endsWith('"')){
+    return s.slice(1,-1).replace(/""/g,'"');
+  }
+  return s;
 }
 function parseLine(line){
   const result=[],re=/("(?:[^"]|"")*"|[^,]*)/g;let m;
