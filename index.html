@@ -186,24 +186,17 @@ async function lerAba(nome){
   try{
     const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(nome)}&t=${Date.now()}`);
     if(!r.ok)return[];
-    const txt=await r.text();
-    if(nome==='sessoes'){
-      // Sessoes NÃO tem cabeçalho — mapear colunas por posição
-      const lines=txt.trim().split('\n').filter(l=>l.trim());
-      return lines.map(l=>{
-        const vals=parseLine(l).map(v=>v.replace(/"/g,'').trim());
-        // Detecta se é linha de cabeçalho (primeira coluna não é timestamp ISO)
-        if(!vals[0]||!vals[0].match(/^\d{4}-\d{2}-\d{2}T/))return null;
-        return{data_hora:vals[0],usuario:vals[1]||'',data:vals[2]||'',hora:vals[3]||'',dia_semana:vals[4]||''};
-      }).filter(Boolean);
-    }
-    return parseCSV(txt);
+    return parseCSV(await r.text());
   }catch(e){console.warn('Erro aba',nome,e);return[];}
 }
 function parseCSV(txt){
   const lines=txt.trim().split('\n');if(lines.length<2)return[];
-  const headers=parseLine(lines[0]).map(h=>h.replace(/"/g,'').trim());
-  return lines.slice(1).map(l=>{
+  const primeiraLinha=parseLine(lines[0]).map(v=>v.replace(/"/g,'').trim());
+  // Detecta se tem cabeçalho: primeira célula não é timestamp ISO
+  const temCabecalho=!primeiraLinha[0].match(/^\d{4}-\d{2}-\d{2}T/);
+  const headers=temCabecalho?primeiraLinha:['data_hora','usuario','data','hora','dia_semana'];
+  const dataLines=temCabecalho?lines.slice(1):lines;
+  return dataLines.map(l=>{
     const vals=parseLine(l),obj={};
     headers.forEach((h,i)=>obj[h]=(vals[i]||'').replace(/"/g,'').trim());
     return obj;
