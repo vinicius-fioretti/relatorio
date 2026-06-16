@@ -281,10 +281,11 @@ function getAtivos7dias(){
   const set7=new Set();
   const agoraMs=Date.now();
   const seteDiasMs=7*24*60*60*1000;
+  // Debug: mostra os primeiros 3 registros para inspeção
+  console.log('Primeiros registros sessoes:', dadosSessoes.slice(0,3).map(s=>({data_hora:s.data_hora, usuario:`[${s.usuario}]`, len:s.usuario?.length})));
   dadosSessoes.forEach(s=>{
     try{
       if(!s.usuario||!s.data_hora)return;
-      // Garante que o timestamp é parseado como UTC
       const dataStr=s.data_hora.trim();
       const d=new Date(dataStr);
       if(isNaN(d.getTime()))return;
@@ -294,7 +295,6 @@ function getAtivos7dias(){
       if(key)set7.add(key);
     }catch(e){}
   });
-  // Debug temporário — remove após confirmar funcionamento
   console.log('Sessoes carregadas:',dadosSessoes.length,'Ativos:',Array.from(set7));
   return set7;
 }
