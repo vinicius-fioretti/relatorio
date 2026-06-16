@@ -278,15 +278,24 @@ function getSnapshotSemanaAnterior(){
 
 // ── ATIVOS 7 DIAS (BUG FIX: match por nome parcial) ──
 function getAtivos7dias(){
-  const hoje=new Date(),set7=new Set();
+  const set7=new Set();
+  const agoraMs=Date.now();
+  const seteDiasMs=7*24*60*60*1000;
   dadosSessoes.forEach(s=>{
     try{
-      const d=new Date(s.data_hora||s.timestamp||'');
-      if(isNaN(d)||(hoje-d)/86400000>7)return;
-      const key=GESTORES.find(g=>s.usuario&&s.usuario.toLowerCase().includes(g.toLowerCase()));
+      if(!s.usuario||!s.data_hora)return;
+      // Garante que o timestamp é parseado como UTC
+      const dataStr=s.data_hora.trim();
+      const d=new Date(dataStr);
+      if(isNaN(d.getTime()))return;
+      const diffMs=agoraMs-d.getTime();
+      if(diffMs<0||diffMs>seteDiasMs)return;
+      const key=GESTORES.find(g=>s.usuario.toLowerCase().includes(g.toLowerCase()));
       if(key)set7.add(key);
     }catch(e){}
   });
+  // Debug temporário — remove após confirmar funcionamento
+  console.log('Sessoes carregadas:',dadosSessoes.length,'Ativos:',Array.from(set7));
   return set7;
 }
 
