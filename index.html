@@ -186,7 +186,16 @@ async function lerAba(nome){
   try{
     const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(nome)}&t=${Date.now()}`);
     if(!r.ok)return[];
-    return parseCSV(await r.text());
+    const txt=await r.text();
+    // Sessoes não tem cabeçalho — primeira linha já é dado (timestamp ISO)
+    if(nome==='sessoes'){
+      const lines=txt.trim().split('\n').filter(l=>l.trim());
+      return lines.map(l=>{
+        const vals=parseLine(l).map(v=>v.replace(/"/g,'').trim());
+        return{data_hora:vals[0]||'',usuario:vals[1]||'',data:vals[2]||'',hora:vals[3]||'',dia_semana:vals[4]||''};
+      });
+    }
+    return parseCSV(txt);
   }catch(e){console.warn('Erro aba',nome,e);return[];}
 }
 function parseCSV(txt){
@@ -270,9 +279,8 @@ function getAtivos7dias(){
   const hoje=new Date(),set7=new Set();
   dadosSessoes.forEach(s=>{
     try{
-      const d=new Date(s.data_hora||s.timestamp);
+      const d=new Date(s.data_hora||s.timestamp||'');
       if(isNaN(d)||(hoje-d)/86400000>7)return;
-      // Match defensivo igual ao snapshot
       const key=GESTORES.find(g=>s.usuario&&s.usuario.toLowerCase().includes(g.toLowerCase()));
       if(key)set7.add(key);
     }catch(e){}
